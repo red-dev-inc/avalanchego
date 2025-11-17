@@ -202,12 +202,6 @@ func (vm *VM) CreateHandlers(context.Context) (map[string]http.Handler, error) {
 		return nil, fmt.Errorf("failed to register service: %w", err)
 	}
 
-	// Register the same API service with "warp" prefix for ICM relayer compatibility
-	// The relayer expects warp_getMessageAggregateSignature endpoint
-	if err := server.RegisterService(apiServer, "warp"); err != nil {
-		return nil, fmt.Errorf("failed to register warp service: %w", err)
-	}
-
 	// Create and register EVM-compatible API service for eth_chainId
 	ethCompatServer := api.NewEthCompatServer(vm.chainContext)
 	if err := server.RegisterService(ethCompatServer, "eth"); err != nil {

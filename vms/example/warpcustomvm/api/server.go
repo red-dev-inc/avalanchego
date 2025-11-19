@@ -7,7 +7,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"sync/atomic"
+	"sync"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"go.uber.org/zap"
@@ -45,15 +45,12 @@ func NewServer(
 	builder builder.Builder,
 	acceptedState database.Database,
 ) Server {
-	s := &server{
+	return &server{
 		ctx:           ctx,
 		chain:         chain,
 		builder:       builder,
 		acceptedState: acceptedState,
 	}
-	// Initialize counter to 7 so next message ID will be 8
-	s.nextTeleporterMsgID.Store(7)
-	return s
 }
 
 // NewEthCompatServer creates an EVM-compatible JSON-RPC server
@@ -62,11 +59,11 @@ func NewEthCompatServer(ctx *snow.Context) EthCompatServer {
 }
 
 type server struct {
-	ctx                 *snow.Context
-	chain               chain.Chain
-	builder             builder.Builder
-	acceptedState       database.Database
-	nextTeleporterMsgID atomic.Uint64
+	ctx           *snow.Context
+	chain         chain.Chain
+	builder       builder.Builder
+	acceptedState database.Database
+	msgIDMutex    sync.Mutex // Protects message ID allocation within same block height
 }
 
 type ethCompatServer struct {
@@ -158,11 +155,17 @@ func (s *server) SubmitMessage(_ *http.Request, args *SubmitMessageArgs, reply *
 	)
 
 	// Try the proper Teleporter message format with destination address from request
-	// Increment and get the next Teleporter message ID
-	teleporterMsgID := s.nextTeleporterMsgID.Add(1)
-	s.ctx.Log.Info("📥 [API Server] Step 4: Encoding Teleporter message",
+	// Allocate a message ID with mutex protection to ensure thread-safety
+	s.ctx.Log.Info("📥 [API Server] Step 4: Allocating Teleporter message ID")
+	teleporterMsgID, err := s.getNextTeleporterMessageID()
+	if err != nil {
+		return fmt.Errorf("failed to allocate message ID: %w", err)
+	}
+	s.ctx.Log.Info("   ✓ Message ID allocated",
 		zap.Uint64("teleporterMessageID", teleporterMsgID),
 	)
+
+	s.ctx.Log.Info("📥 [API Server] Step 5: Encoding Teleporter message")
 	encodedPayload, err := teleporter.CreateProperTeleporterMessageWithAddress(
 		teleporterMsgID,
 		destinationChainID,
@@ -180,7 +183,7 @@ func (s *server) SubmitMessage(_ *http.Request, args *SubmitMessageArgs, reply *
 		}
 	}
 
-	s.ctx.Log.Info("📥 [API Server] Step 5: ✓ Teleporter payload encoded",
+	s.ctx.Log.Info("📥 [API Server] Step 6: ✓ Teleporter payload encoded",
 		zap.Int("encodedSize", len(encodedPayload)),
 		zap.String("first64Bytes", fmt.Sprintf("0x%x", encodedPayload[:min(64, len(encodedPayload))])),
 	)
@@ -188,7 +191,7 @@ func (s *server) SubmitMessage(_ *http.Request, args *SubmitMessageArgs, reply *
 	// ICM relayer expects: Warp → AddressedCall → Teleporter Message
 	// The AddressedCall wraps the Teleporter message with a source address
 	sourceAddress := TeleporterPrecompileAddress
-	s.ctx.Log.Info("📥 [API Server] Step 6: Creating AddressedCall wrapper",
+	s.ctx.Log.Info("📥 [API Server] Step 7: Creating AddressedCall wrapper",
 		zap.String("sourceAddress", fmt.Sprintf("0x%x", sourceAddress)),
 		zap.Int("teleporterPayloadSize", len(encodedPayload)),
 	)
@@ -205,7 +208,7 @@ func (s *server) SubmitMessage(_ *http.Request, args *SubmitMessageArgs, reply *
 	s.ctx.Log.Info("   ✓ AddressedCall created", zap.Int("size", len(addressedCall.Bytes())))
 
 	// Create unsigned Warp message with AddressedCall payload
-	s.ctx.Log.Info("📥 [API Server] Step 7: Creating unsigned Warp message",
+	s.ctx.Log.Info("📥 [API Server] Step 8: Creating unsigned Warp message",
 		zap.Uint32("networkID", s.ctx.NetworkID),
 		zap.String("sourceChainID", s.ctx.ChainID.String()),
 	)
@@ -225,20 +228,21 @@ func (s *server) SubmitMessage(_ *http.Request, args *SubmitMessageArgs, reply *
 	// Compute message ID from the unsigned message bytes
 	messageIDHash := hashing.ComputeHash256Array(unsignedMsg.Bytes())
 	messageID := ids.ID(messageIDHash)
-	s.ctx.Log.Info("📥 [API Server] Step 8: Computed message ID",
+	s.ctx.Log.Info("📥 [API Server] Step 9: Computed Warp message ID",
 		zap.String("messageID", messageID.String()),
 		zap.String("messageIDHex", fmt.Sprintf("0x%x", messageID[:])),
 	)
 
-	// Add to pending messages (builder will store it)
-	s.ctx.Log.Info("📥 [API Server] Step 9: Adding message to builder")
+	// Add to pending messages - builder will embed full message bytes in next block
+	// The block will propagate through consensus, ensuring all validators get the message
+	s.ctx.Log.Info("📥 [API Server] Step 10: Adding message to builder")
 	if err := s.builder.AddMessage(context.Background(), messageID, unsignedMsg); err != nil {
 		s.ctx.Log.Error("❌ Failed to add message to builder", zap.Error(err))
 		return err
 	}
 	s.ctx.Log.Info("   ✓ Message added to builder successfully")
 
-	s.ctx.Log.Info("📥 [API Server] ✅ Step 10: Teleporter message submitted successfully!",
+	s.ctx.Log.Info("📥 [API Server] ✅ Step 11: Teleporter message submitted successfully!",
 		zap.String("messageID", messageID.String()),
 		zap.String("destinationChain", destinationChainID.String()),
 		zap.String("destinationAddress", args.DestinationAddress),
@@ -286,12 +290,30 @@ func (s *server) GetLatestBlock(_ *http.Request, _ *struct{}, reply *GetBlockRep
 	reply.Height = blockHeader.Number
 	reply.Timestamp = blockHeader.Timestamp
 
-	// Fetch full Warp message details for each message ID
+	// Extract full Warp message details directly from block header
+	// Messages are embedded in the block and synced across all validators via consensus
 	reply.Messages = make([]MessageDetail, 0, len(blockHeader.Messages))
+
+	// Handle old blocks that don't have WarpMessages field (backward compatibility)
+	if blockHeader.WarpMessages == nil {
+		blockHeader.WarpMessages = make(map[string][]byte)
+	}
+
 	for _, msgID := range blockHeader.Messages {
-		unsignedMsg, err := state.GetWarpMessage(s.acceptedState, msgID)
+		// Get message bytes from block header (embedded during block creation)
+		msgBytes, exists := blockHeader.WarpMessages[msgID.String()]
+		if !exists {
+			s.ctx.Log.Warn("message ID in block but bytes not found",
+				zap.Stringer("messageID", msgID),
+				zap.Uint64("blockHeight", blockHeader.Number),
+			)
+			continue
+		}
+
+		// Parse the unsigned Warp message from bytes
+		unsignedMsg, err := warpmsg.ParseUnsignedMessage(msgBytes)
 		if err != nil {
-			s.ctx.Log.Warn("failed to get warp message details",
+			s.ctx.Log.Warn("failed to parse warp message from block",
 				zap.Stringer("messageID", msgID),
 				zap.Error(err),
 			)
@@ -326,6 +348,36 @@ func (s *server) GetLatestBlock(_ *http.Request, _ *struct{}, reply *GetBlockRep
 	return nil
 }
 
+// getNextTeleporterMessageID allocates the next Teleporter message ID
+// Uses a simple global incrementing counter stored in accepted state
+// This ensures all validators get the same IDs and prevents duplicates
+func (s *server) getNextTeleporterMessageID() (uint64, error) {
+	// Lock to prevent race conditions during message ID allocation
+	s.msgIDMutex.Lock()
+	defer s.msgIDMutex.Unlock()
+
+	// Get the last allocated message ID
+	lastMessageID, err := state.GetLastMessageID(s.acceptedState)
+	if err != nil {
+		return 0, fmt.Errorf("failed to get last message ID: %w", err)
+	}
+
+	// Increment to get next ID
+	nextMessageID := lastMessageID + 1
+
+	// Store the new message ID in accepted state
+	if err := state.SetLastMessageID(s.acceptedState, nextMessageID); err != nil {
+		return 0, fmt.Errorf("failed to update last message ID: %w", err)
+	}
+
+	s.ctx.Log.Info("✓ Teleporter message ID allocated",
+		zap.Uint64("messageID", nextMessageID),
+		zap.Uint64("previousID", lastMessageID),
+	)
+
+	return nextMessageID, nil
+}
+
 // GetBlock handles the warpcustomvm.getBlock JSON-RPC method
 func (s *server) GetBlock(_ *http.Request, args *GetBlockArgs, reply *GetBlockReply) error {
 	// Get block ID by height
@@ -345,12 +397,30 @@ func (s *server) GetBlock(_ *http.Request, args *GetBlockArgs, reply *GetBlockRe
 	reply.Height = blockHeader.Number
 	reply.Timestamp = blockHeader.Timestamp
 
-	// Fetch full Warp message details for each message ID
+	// Extract full Warp message details directly from block header
+	// Messages are embedded in the block and synced across all validators via consensus
 	reply.Messages = make([]MessageDetail, 0, len(blockHeader.Messages))
+
+	// Handle old blocks that don't have WarpMessages field (backward compatibility)
+	if blockHeader.WarpMessages == nil {
+		blockHeader.WarpMessages = make(map[string][]byte)
+	}
+
 	for _, msgID := range blockHeader.Messages {
-		unsignedMsg, err := state.GetWarpMessage(s.acceptedState, msgID)
+		// Get message bytes from block header (embedded during block creation)
+		msgBytes, exists := blockHeader.WarpMessages[msgID.String()]
+		if !exists {
+			s.ctx.Log.Warn("message ID in block but bytes not found",
+				zap.Stringer("messageID", msgID),
+				zap.Uint64("blockHeight", blockHeader.Number),
+			)
+			continue
+		}
+
+		// Parse the unsigned Warp message from bytes
+		unsignedMsg, err := warpmsg.ParseUnsignedMessage(msgBytes)
 		if err != nil {
-			s.ctx.Log.Warn("failed to get warp message details",
+			s.ctx.Log.Warn("failed to parse warp message from block",
 				zap.Stringer("messageID", msgID),
 				zap.Error(err),
 			)

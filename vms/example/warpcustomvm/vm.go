@@ -154,6 +154,7 @@ func (vm *VM) Initialize(
 
 	chainContext.Log.Info("initialized vm",
 		zap.Stringer("lastAccepted", lastAcceptedID),
+		zap.String("lastAcceptedHex", lastAcceptedID.String()),
 	)
 
 	return nil
@@ -328,6 +329,12 @@ func (vm *VM) ParseBlock(_ context.Context, blockBytes []byte) (snowman.Block, e
 		return nil, fmt.Errorf("failed to unmarshal block: %w", err)
 	}
 
+	vm.chainContext.Log.Info("📦 ParseBlock received block from network",
+		zap.Uint64("height", blk.Height),
+		zap.Int("messageIDs", len(blk.Messages)),
+		zap.Int("warpMessages", len(blk.WarpMessages)),
+	)
+
 	// Create block wrapper through chain
 	wrapper, err := vm.chain.NewBlock(&blk)
 	if err != nil {
@@ -344,6 +351,7 @@ func (vm *VM) GetBlock(_ context.Context, blockID ids.ID) (snowman.Block, error)
 
 // SetPreference implements the block.ChainVM interface
 func (vm *VM) SetPreference(_ context.Context, preferred ids.ID) error {
+	vm.chainContext.Log.Debug("SetPreference called", zap.Stringer("preferred", preferred))
 	vm.builder.SetPreference(preferred)
 	return nil
 }

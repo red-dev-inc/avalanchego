@@ -18,6 +18,7 @@ import (
 	"github.com/ava-labs/avalanchego/utils/set"
 	"github.com/ava-labs/avalanchego/vms/example/warpcustomvm/block"
 	"github.com/ava-labs/avalanchego/vms/example/warpcustomvm/state"
+	warpmsg "github.com/ava-labs/avalanchego/vms/platformvm/warp"
 
 	smblock "github.com/ava-labs/avalanchego/snow/engine/snowman/block"
 )
@@ -91,10 +92,11 @@ func New(ctx *snow.Context, db database.Database) (Chain, error) {
 
 		// Create genesis block
 		genesisBlock := &block.Block{
-			ParentID:  ids.Empty,
-			Height:    0,
-			Timestamp: genesisHeader.Timestamp,
-			Messages:  []ids.ID{},
+			ParentID:     ids.Empty,
+			Height:       0,
+			Timestamp:    genesisHeader.Timestamp,
+			Messages:     []ids.ID{},
+			WarpMessages: make(map[string][]byte),
 		}
 
 		genesisBytes, err := genesisBlock.Bytes()
@@ -173,11 +175,17 @@ func (c *chain) getBlock(blkID ids.ID) (*blockWrapper, error) {
 	}
 
 	// Reconstruct block from header
+	warpMessages := header.WarpMessages
+	if warpMessages == nil {
+		warpMessages = make(map[string][]byte)
+	}
+
 	blk := &block.Block{
-		ParentID:  header.ParentHash,
-		Height:    header.Number,
-		Timestamp: header.Timestamp,
-		Messages:  header.Messages,
+		ParentID:     header.ParentHash,
+		Height:       header.Number,
+		Timestamp:    header.Timestamp,
+		Messages:     header.Messages,
+		WarpMessages: warpMessages,
 	}
 
 	blkBytes, err := blk.Bytes()
@@ -239,13 +247,53 @@ func (b *blockWrapper) Accept(ctx context.Context) error {
 		}
 	}
 
+	// CRITICAL: Extract and store all Warp messages from this block
+	// Messages are embedded in the block and propagate through consensus to all validators
+	for _, msgID := range b.Block.Messages {
+		// Get message bytes from block (these were embedded during block creation)
+		msgBytes, exists := b.Block.WarpMessages[msgID.String()]
+		if !exists {
+			b.chain.chainContext.Log.Error("message ID in block but bytes not found",
+				zap.Stringer("messageID", msgID),
+				zap.Uint64("blockHeight", b.Block.Height),
+			)
+			continue
+		}
+
+		// Parse the unsigned Warp message from bytes
+		msg, err := warpmsg.ParseUnsignedMessage(msgBytes)
+		if err != nil {
+			b.chain.chainContext.Log.Error("failed to parse warp message from block",
+				zap.Stringer("messageID", msgID),
+				zap.Error(err),
+			)
+			continue
+		}
+
+		// Store message in accepted state
+		if err := state.SetWarpMessage(b.chain.acceptedState, msgID, msg); err != nil {
+			b.chain.chainContext.Log.Error("failed to store warp message in accepted state",
+				zap.Stringer("messageID", msgID),
+				zap.Error(err),
+			)
+			return err
+		}
+
+		b.chain.chainContext.Log.Info("✓ stored warp message from accepted block",
+			zap.Stringer("messageID", msgID),
+			zap.Uint64("blockHeight", b.Block.Height),
+			zap.Int("messageSize", len(msgBytes)),
+		)
+	}
+
 	// Update block header in state
 	header := &state.BlockHeader{
-		Number:     b.Block.Height,
-		Hash:       b.id,
-		ParentHash: b.ParentID,
-		Timestamp:  b.Block.Timestamp,
-		Messages:   b.Block.Messages,
+		Number:       b.Block.Height,
+		Hash:         b.id,
+		ParentHash:   b.ParentID,
+		Timestamp:    b.Block.Timestamp,
+		Messages:     b.Block.Messages,
+		WarpMessages: b.Block.WarpMessages,
 	}
 
 	if err := state.SetBlockHeader(b.chain.acceptedState, header); err != nil {

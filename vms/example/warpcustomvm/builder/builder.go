@@ -5,7 +5,6 @@ package builder
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"time"
 
@@ -18,7 +17,6 @@ import (
 	"github.com/ava-labs/avalanchego/utils/linked"
 	"github.com/ava-labs/avalanchego/vms/example/warpcustomvm/block"
 	"github.com/ava-labs/avalanchego/vms/example/warpcustomvm/chain"
-	"github.com/ava-labs/avalanchego/vms/example/warpcustomvm/state"
 	warpmsg "github.com/ava-labs/avalanchego/vms/platformvm/warp"
 
 	smblock "github.com/ava-labs/avalanchego/snow/engine/snowman/block"
@@ -62,18 +60,15 @@ func New(chainContext *snow.Context, chain chain.Chain, db database.Database) Bu
 }
 
 func (b *builder) SetPreference(preferred ids.ID) {
+	b.chainContext.Log.Info("builder preference updated", zap.Stringer("preferred", preferred))
 	b.preference = preferred
 }
 
 // AddMessage adds a Warp message to the pending pool
+// Note: The message should already be stored in accepted state by the API server
 func (b *builder) AddMessage(_ context.Context, messageID ids.ID, message *warpmsg.UnsignedMessage) error {
 	b.pendingMessagesMu.Lock()
 	defer b.pendingMessagesMu.Unlock()
-
-	// Store Warp message
-	if err := state.SetWarpMessage(b.db, messageID, message); err != nil {
-		return fmt.Errorf("failed to store warp message: %w", err)
-	}
 
 	b.chainContext.Log.Info("added Warp message to pending pool",
 		zap.Stringer("messageID", messageID),
@@ -82,15 +77,18 @@ func (b *builder) AddMessage(_ context.Context, messageID ids.ID, message *warpm
 
 	b.pendingMessages.Put(messageID, message)
 	b.pendingMessagesCond.Broadcast()
+
 	return nil
 }
 
 // WaitForEvent waits for pending messages or context cancellation
 func (b *builder) WaitForEvent(ctx context.Context) (common.Message, error) {
+	b.chainContext.Log.Debug("🔍 WaitForEvent called")
 	b.pendingMessagesMu.Lock()
 	defer b.pendingMessagesMu.Unlock()
 
 	for b.pendingMessages.Len() == 0 {
+		b.chainContext.Log.Debug("⏳ waiting for pending messages...")
 		// Check context before waiting
 		select {
 		case <-ctx.Done():
@@ -100,14 +98,18 @@ func (b *builder) WaitForEvent(ctx context.Context) (common.Message, error) {
 		b.pendingMessagesCond.Wait()
 	}
 
+	b.chainContext.Log.Info("✅ WaitForEvent returning PendingTxs", zap.Int("pendingCount", b.pendingMessages.Len()))
 	return common.PendingTxs, nil
 }
 
 // BuildBlock builds a new block from pending messages
 func (b *builder) BuildBlock(ctx context.Context, blockContext *smblock.Context) (chain.Block, error) {
+	b.chainContext.Log.Info("🔨 BuildBlock called")
+
 	// Get the preferred block
 	preferredBlk, err := b.chain.GetBlock(b.preference)
 	if err != nil {
+		b.chainContext.Log.Error("❌ BuildBlock failed to get preferred block", zap.Error(err))
 		return nil, err
 	}
 
@@ -119,24 +121,32 @@ func (b *builder) BuildBlock(ctx context.Context, blockContext *smblock.Context)
 
 	// Create new block
 	wipBlock := &block.Block{
-		ParentID:  b.preference,
-		Timestamp: timestamp,
-		Height:    preferredBlk.Height() + 1,
-		Messages:  []ids.ID{},
+		ParentID:     b.preference,
+		Timestamp:    timestamp,
+		Height:       preferredBlk.Height() + 1,
+		Messages:     []ids.ID{},
+		WarpMessages: make(map[string][]byte),
 	}
 
 	b.pendingMessagesMu.Lock()
 	defer b.pendingMessagesMu.Unlock()
 
-	// Add pending messages to the block
+	// Add pending messages to the block with full message bytes
 	for len(wipBlock.Messages) < MaxMessagesPerBlock {
-		messageID, _, exists := b.pendingMessages.Oldest()
+		messageID, unsignedMsg, exists := b.pendingMessages.Oldest()
 		if !exists {
 			break
 		}
 		b.pendingMessages.Delete(messageID)
 
 		wipBlock.Messages = append(wipBlock.Messages, messageID)
+		// Store full message bytes in block for consensus propagation
+		wipBlock.WarpMessages[messageID.String()] = unsignedMsg.Bytes()
+
+		b.chainContext.Log.Info("  → added message to block",
+			zap.Stringer("messageID", messageID),
+			zap.Int("messageBytes", len(unsignedMsg.Bytes())),
+		)
 	}
 
 	// Create block through chain
@@ -145,9 +155,10 @@ func (b *builder) BuildBlock(ctx context.Context, blockContext *smblock.Context)
 		return nil, err
 	}
 
-	b.chainContext.Log.Info("built block",
+	b.chainContext.Log.Info("🔨 built block",
 		zap.Uint64("height", wipBlock.Height),
-		zap.Int("messages", len(wipBlock.Messages)),
+		zap.Int("messageIDs", len(wipBlock.Messages)),
+		zap.Int("warpMessages", len(wipBlock.WarpMessages)),
 		zap.Stringer("parent", wipBlock.ParentID),
 	)
 

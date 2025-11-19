@@ -24,6 +24,11 @@ type Block struct {
 
 	// Messages contains the IDs of Teleporter messages included in this block
 	Messages []ids.ID `json:"messages"`
+
+	// WarpMessages contains the full unsigned Warp message bytes
+	// Key: message ID, Value: unsigned Warp message bytes
+	// This ensures messages propagate through consensus to all validators
+	WarpMessages map[string][]byte `json:"warpMessages"`
 }
 
 // ID computes the unique identifier for this block

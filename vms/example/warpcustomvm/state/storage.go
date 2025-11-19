@@ -15,10 +15,11 @@ import (
 
 var (
 	// Prefixes for different data types in the database
-	warpMessagePrefix  = []byte("warp")
-	blockHeaderPrefix  = []byte("blockheader")
-	blockHeightPrefix  = []byte("blockheight")
-	lastAcceptedPrefix = []byte("lastaccepted")
+	warpMessagePrefix   = []byte("warp")
+	blockHeaderPrefix   = []byte("blockheader")
+	blockHeightPrefix   = []byte("blockheight")
+	lastAcceptedPrefix  = []byte("lastaccepted")
+	lastMessageIDPrefix = []byte("lastmsgid")
 
 	ErrNotFound = errors.New("not found")
 )
@@ -28,11 +29,12 @@ type KeyValueWriter = database.KeyValueWriter
 
 // BlockHeader represents minimal block metadata
 type BlockHeader struct {
-	Number     uint64   `json:"number"`
-	Hash       ids.ID   `json:"hash"`
-	ParentHash ids.ID   `json:"parentHash"`
-	Timestamp  int64    `json:"timestamp"`
-	Messages   []ids.ID `json:"messages"`
+	Number       uint64            `json:"number"`
+	Hash         ids.ID            `json:"hash"`
+	ParentHash   ids.ID            `json:"parentHash"`
+	Timestamp    int64             `json:"timestamp"`
+	Messages     []ids.ID          `json:"messages"`
+	WarpMessages map[string][]byte `json:"warpMessages"` // Full message bytes
 }
 
 // SetBlockHeader stores a block header in the database
@@ -69,6 +71,11 @@ func GetBlockHeader(db database.KeyValueReader, blockHash ids.ID) (*BlockHeader,
 	var header BlockHeader
 	if err := json.Unmarshal(data, &header); err != nil {
 		return nil, err
+	}
+
+	// Initialize WarpMessages if nil (backward compatibility with old blocks)
+	if header.WarpMessages == nil {
+		header.WarpMessages = make(map[string][]byte)
 	}
 
 	return &header, nil
@@ -123,10 +130,12 @@ func GetLatestBlockHeader(db database.KeyValueReader) (*BlockHeader, error) {
 	if blockID == ids.Empty {
 		// Return genesis block header
 		return &BlockHeader{
-			Number:     0,
-			Hash:       ids.Empty,
-			ParentHash: ids.Empty,
-			Timestamp:  0,
+			Number:       0,
+			Hash:         ids.Empty,
+			ParentHash:   ids.Empty,
+			Timestamp:    0,
+			Messages:     []ids.ID{},
+			WarpMessages: make(map[string][]byte),
 		}, nil
 	}
 
@@ -151,4 +160,28 @@ func GetWarpMessage(db database.KeyValueReader, messageID ids.ID) (*warp.Unsigne
 	}
 
 	return warp.ParseUnsignedMessage(data)
+}
+
+// SetLastMessageID stores the last allocated Teleporter message ID
+func SetLastMessageID(db database.KeyValueWriter, messageID uint64) error {
+	data := make([]byte, 8)
+	binary.BigEndian.PutUint64(data, messageID)
+	return db.Put(lastMessageIDPrefix, data)
+}
+
+// GetLastMessageID retrieves the last allocated Teleporter message ID
+func GetLastMessageID(db database.KeyValueReader) (uint64, error) {
+	data, err := db.Get(lastMessageIDPrefix)
+	if err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			return 0, nil // Start from 0 if not found
+		}
+		return 0, err
+	}
+
+	if len(data) != 8 {
+		return 0, errors.New("invalid last message ID length")
+	}
+
+	return binary.BigEndian.Uint64(data), nil
 }

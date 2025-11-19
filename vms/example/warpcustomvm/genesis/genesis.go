@@ -32,11 +32,12 @@ func (g *Genesis) Bytes() ([]byte, error) {
 func Initialize(db state.KeyValueWriter, genesis *Genesis) error {
 	// Create genesis block header
 	genesisHeader := &state.BlockHeader{
-		Number:     0,
-		Hash:       ids.Empty,
-		ParentHash: ids.Empty,
-		Timestamp:  genesis.Timestamp,
-		Messages:   []ids.ID{}, // Genesis block has no messages
+		Number:       0,
+		Hash:         ids.Empty,
+		ParentHash:   ids.Empty,
+		Timestamp:    genesis.Timestamp,
+		Messages:     []ids.ID{},              // Genesis block has no messages
+		WarpMessages: make(map[string][]byte), // Initialize empty map
 	}
 
 	// Store genesis block header

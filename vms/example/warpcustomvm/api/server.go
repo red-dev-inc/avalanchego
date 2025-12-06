@@ -31,6 +31,9 @@ type Server interface {
 	GetMessage(r *http.Request, args *GetMessageArgs, reply *GetMessageReply) error
 	GetLatestBlock(r *http.Request, args *struct{}, reply *GetBlockReply) error
 	GetBlock(r *http.Request, args *GetBlockArgs, reply *GetBlockReply) error
+	ReceiveWarpMessage(r *http.Request, args *ReceiveWarpMessageArgs, reply *ReceiveWarpMessageReply) error
+	GetReceivedMessage(r *http.Request, args *GetReceivedMessageArgs, reply *GetReceivedMessageReply) error
+	GetAllReceivedMessages(r *http.Request, args *struct{}, reply *GetAllReceivedMessagesReply) error
 }
 
 // EthCompatServer provides EVM-compatible JSON-RPC methods

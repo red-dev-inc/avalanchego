@@ -19,6 +19,7 @@ import (
 	"github.com/ava-labs/avalanchego/vms/example/warpcustomvm/block"
 	"github.com/ava-labs/avalanchego/vms/example/warpcustomvm/state"
 	warpmsg "github.com/ava-labs/avalanchego/vms/platformvm/warp"
+	"github.com/ava-labs/avalanchego/vms/platformvm/warp/payload"
 
 	smblock "github.com/ava-labs/avalanchego/snow/engine/snowman/block"
 )
@@ -284,6 +285,62 @@ func (b *blockWrapper) Accept(ctx context.Context) error {
 			zap.Uint64("blockHeight", b.Block.Height),
 			zap.Int("messageSize", len(msgBytes)),
 		)
+
+		// Check if this is a received message from another chain (not our own)
+		if msg.SourceChainID != b.chain.chainContext.ChainID {
+			b.chain.chainContext.Log.Info("📨 Detected incoming message from external chain",
+				zap.Stringer("sourceChainID", msg.SourceChainID),
+				zap.Stringer("ourChainID", b.chain.chainContext.ChainID),
+				zap.Stringer("messageID", msgID),
+			)
+
+			// Parse AddressedCall to get source address and payload
+			addressedCall, err := payload.ParseAddressedCall(msg.Payload)
+			if err != nil {
+				b.chain.chainContext.Log.Warn("⚠️  Could not parse AddressedCall from received message",
+					zap.Stringer("messageID", msgID),
+					zap.Error(err),
+				)
+				// Continue anyway - store what we can
+			}
+
+			var sourceAddress []byte
+			var innerPayload []byte
+			if addressedCall != nil {
+				sourceAddress = addressedCall.SourceAddress
+				innerPayload = addressedCall.Payload
+			} else {
+				// If not AddressedCall format, store the raw payload
+				innerPayload = msg.Payload
+			}
+
+			// Create received message record
+			receivedMsg := &state.ReceivedMessage{
+				MessageID:       msgID,
+				SourceChainID:   msg.SourceChainID,
+				SourceAddress:   sourceAddress,
+				Payload:         innerPayload,
+				ReceivedAt:      time.Now().Unix(),
+				BlockHeight:     b.Block.Height,
+				SignedMessage:   []byte{}, // We don't have the signed bytes here
+				UnsignedMessage: msgBytes,
+			}
+
+			// Store as received message so all nodes have it
+			if err := state.SetReceivedMessage(b.chain.acceptedState, receivedMsg); err != nil {
+				b.chain.chainContext.Log.Error("❌ Failed to store received message",
+					zap.Stringer("messageID", msgID),
+					zap.Error(err),
+				)
+				// Don't return error - continue processing block
+			} else {
+				b.chain.chainContext.Log.Info("✅ Stored received message from external chain",
+					zap.Stringer("messageID", msgID),
+					zap.Stringer("sourceChain", msg.SourceChainID),
+					zap.Uint64("blockHeight", b.Block.Height),
+				)
+			}
+		}
 	}
 
 	// Update block header in state

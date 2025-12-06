@@ -15,11 +15,13 @@ import (
 
 var (
 	// Prefixes for different data types in the database
-	warpMessagePrefix   = []byte("warp")
-	blockHeaderPrefix   = []byte("blockheader")
-	blockHeightPrefix   = []byte("blockheight")
-	lastAcceptedPrefix  = []byte("lastaccepted")
-	lastMessageIDPrefix = []byte("lastmsgid")
+	warpMessagePrefix     = []byte("warp")
+	blockHeaderPrefix     = []byte("blockheader")
+	blockHeightPrefix     = []byte("blockheight")
+	lastAcceptedPrefix    = []byte("lastaccepted")
+	lastMessageIDPrefix   = []byte("lastmsgid")
+	receivedMessagePrefix = []byte("received")       // Stores received messages from other chains
+	receivedMessageIDsKey = []byte("receivedmsgids") // Stores list of all received message IDs
 
 	ErrNotFound = errors.New("not found")
 )
@@ -184,4 +186,99 @@ func GetLastMessageID(db database.KeyValueReader) (uint64, error) {
 	}
 
 	return binary.BigEndian.Uint64(data), nil
+}
+
+// ReceivedMessage represents a Warp message received from another chain
+type ReceivedMessage struct {
+	MessageID       ids.ID `json:"messageID"`
+	SourceChainID   ids.ID `json:"sourceChainID"`
+	SourceAddress   []byte `json:"sourceAddress"`
+	Payload         []byte `json:"payload"`
+	ReceivedAt      int64  `json:"receivedAt"`      // Unix timestamp
+	BlockHeight     uint64 `json:"blockHeight"`     // Block height when received
+	SignedMessage   []byte `json:"signedMessage"`   // Full signed Warp message bytes
+	UnsignedMessage []byte `json:"unsignedMessage"` // Unsigned Warp message bytes
+}
+
+// SetReceivedMessage stores a received Warp message in the database
+func SetReceivedMessage(db database.Database, msg *ReceivedMessage) error {
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return err
+	}
+
+	key := append(receivedMessagePrefix, msg.MessageID[:]...)
+	if err := db.Put(key, data); err != nil {
+		return err
+	}
+
+	// Add message ID to the list of received message IDs
+	return appendReceivedMessageID(db, msg.MessageID)
+}
+
+// GetReceivedMessage retrieves a received Warp message by ID
+func GetReceivedMessage(db database.KeyValueReader, messageID ids.ID) (*ReceivedMessage, error) {
+	key := append(receivedMessagePrefix, messageID[:]...)
+	data, err := db.Get(key)
+	if err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+
+	var msg ReceivedMessage
+	if err := json.Unmarshal(data, &msg); err != nil {
+		return nil, err
+	}
+
+	return &msg, nil
+}
+
+// appendReceivedMessageID adds a message ID to the list of received message IDs
+func appendReceivedMessageID(db database.Database, messageID ids.ID) error {
+	// Get existing list
+	data, err := db.Get(receivedMessageIDsKey)
+	var messageIDs []ids.ID
+	if err != nil {
+		if !errors.Is(err, database.ErrNotFound) {
+			return err
+		}
+		// List doesn't exist yet, start fresh
+		messageIDs = []ids.ID{}
+	} else {
+		// Unmarshal existing list
+		if err := json.Unmarshal(data, &messageIDs); err != nil {
+			return err
+		}
+	}
+
+	// Append new message ID
+	messageIDs = append(messageIDs, messageID)
+
+	// Marshal and save
+	data, err = json.Marshal(messageIDs)
+	if err != nil {
+		return err
+	}
+
+	return db.Put(receivedMessageIDsKey, data)
+}
+
+// GetAllReceivedMessageIDs retrieves all received message IDs
+func GetAllReceivedMessageIDs(db database.KeyValueReader) ([]ids.ID, error) {
+	data, err := db.Get(receivedMessageIDsKey)
+	if err != nil {
+		if errors.Is(err, database.ErrNotFound) {
+			return []ids.ID{}, nil
+		}
+		return nil, err
+	}
+
+	var messageIDs []ids.ID
+	if err := json.Unmarshal(data, &messageIDs); err != nil {
+		return nil, err
+	}
+
+	return messageIDs, nil
 }

@@ -127,6 +127,43 @@ type GetWarpMessageReply struct {
 	DestinationAddr  string `json:"destinationAddress"`
 }
 
+// ReceiveWarpMessageArgs is the args for receiving a Warp message from another chain
+type ReceiveWarpMessageArgs struct {
+	SignedMessage    []byte `json:"signedMessage"`    // Raw bytes from ICM relayer
+	SignedMessageHex string `json:"signedMessageHex"` // Hex-encoded (for manual calls)
+}
+
+// ReceiveWarpMessageReply is the response from receiving a Warp message
+type ReceiveWarpMessageReply struct {
+	MessageID     ids.ID `json:"messageID"`
+	SourceChainID ids.ID `json:"sourceChainID"`
+	TxID          ids.ID `json:"txId"` // Transaction ID for ICM relayer
+	Success       bool   `json:"success"`
+	Message       string `json:"message,omitempty"`
+}
+
+// GetReceivedMessageArgs is the args for getting a received message
+type GetReceivedMessageArgs struct {
+	MessageID ids.ID `json:"messageID"`
+}
+
+// GetReceivedMessageReply is the response for getting a received message
+type GetReceivedMessageReply struct {
+	MessageID       ids.ID `json:"messageID"`
+	SourceChainID   ids.ID `json:"sourceChainID"`
+	SourceAddress   string `json:"sourceAddress"`   // Hex-encoded
+	Payload         string `json:"payload"`         // Hex-encoded or string
+	ReceivedAt      int64  `json:"receivedAt"`      // Unix timestamp
+	BlockHeight     uint64 `json:"blockHeight"`     // Block height when received
+	SignedMessage   string `json:"signedMessage"`   // Hex-encoded
+	UnsignedMessage string `json:"unsignedMessage"` // Hex-encoded
+}
+
+// GetAllReceivedMessagesReply is the response for getting all received messages
+type GetAllReceivedMessagesReply struct {
+	Messages []GetReceivedMessageReply `json:"messages"`
+}
+
 // GetChainID retrieves the blockchain ID and network ID via JSON-RPC
 func (c *Client) GetChainID(
 	ctx context.Context,

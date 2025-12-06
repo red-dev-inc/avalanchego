@@ -1,6 +1,64 @@
 # Warp Custom VM
 
-A custom Avalanche VM implementing Avalanche Warp Messaging (AWM) for sending cross-chain messages from this VM to C-Chain via the ICM (Interchain Messaging) relayer. Features consensus-based message propagation with full Snowman consensus integration.
+A custom Avalanche VM implementing **bidirectional** Avalanche Warp Messaging (AWM) for cross-chain communication. Features consensus-based message propagation with full Snowman consensus integration.
+
+## Features
+
+- ✅ **Send messages** from warpcustomvm to C-Chain (or any other chain)
+- ✅ **Receive messages** from C-Chain (or any other chain) to warpcustomvm
+- ✅ Full Teleporter protocol support
+- ✅ ACP-118 Warp signature aggregation
+- ✅ ICM relayer compatibility
+- ✅ Consensus-based message propagation
+
+## Quick Start
+
+### Send a Message (WarpCustomVM → C-Chain)
+```bash
+curl -X POST http://localhost:9650/ext/bc/YOUR_BLOCKCHAIN_ID/rpc \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "warpcustomvm.submitMessage",
+    "params": {
+      "destinationChain": "0x7fc93d85c6d62c5b2ac0b519c87010ea5294012d1e407030d6acd0021cac10d5",
+      "destinationAddress": "0xYourCChainReceiverContract",
+      "message": "Hello from WarpCustomVM!"
+    }
+  }'
+```
+
+### Receive a Message (C-Chain → WarpCustomVM)
+
+**Step 1: Send from C-Chain (Solidity):**
+```solidity
+// Deploy WarpMessageSender.sol then call:
+senderContract.sendMessage(
+  0x<WARPCUSTOMVM_BLOCKCHAIN_ID>,
+  0x0200000000000000000000000000000000000005, // Warp precompile
+  "Hello from C-Chain!"
+);
+```
+
+**Step 2: ICM Relayer automatically delivers** (no manual action needed!)
+
+**Step 3: Query received messages:**
+```bash
+curl -X POST http://localhost:9650/ext/bc/YOUR_BLOCKCHAIN_ID/rpc \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "warpcustomvm.getAllReceivedMessages",
+    "params": {}
+  }'
+```
+
+📖 **For detailed instructions:**
+- [ICM_RELAYER_INTEGRATION.md](./ICM_RELAYER_INTEGRATION.md) - **How ICM relayer works with warpcustomvm**
+- [ICM_RELAYER_CONFIG.md](./ICM_RELAYER_CONFIG.md) - Complete relayer setup & configuration
+- [RECEIVING_MESSAGES.md](./RECEIVING_MESSAGES.md) - Detailed receiving guide
 
 ## Architecture Overview
 
@@ -42,6 +100,9 @@ A custom Avalanche VM implementing Avalanche Warp Messaging (AWM) for sending cr
 
 6. **HTTP API** (`api/`)
    - JSON-RPC 2.0 endpoints for message submission and querying
+   - **Sending**: `submitMessage` - Send Warp messages to other chains
+   - **Receiving**: `receiveWarpMessage` - Accept signed messages from other chains
+   - **Querying**: `getReceivedMessage`, `getAllReceivedMessages` - Query received messages
    - Block retrieval by height or "latest"
    - **Message allocation from consensus state** (race-condition aware)
    - Backward compatible with old blocks (nil map handling)

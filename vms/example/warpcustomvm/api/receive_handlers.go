@@ -7,7 +7,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"time"
 
 	"github.com/ethereum/go-ethereum/accounts/abi"
 	"go.uber.org/zap"
@@ -110,18 +109,6 @@ func (s *server) ReceiveWarpMessage(_ *http.Request, args *ReceiveWarpMessageArg
 			return fmt.Errorf("failed to get block header: %w", err)
 		}
 		blockHeight = header.Number
-	}
-
-	// Create received message record
-	receivedMsg := &state.ReceivedMessage{
-		MessageID:       messageID,
-		SourceChainID:   unsignedMsg.SourceChainID,
-		SourceAddress:   addressedCall.SourceAddress,
-		Payload:         addressedCall.Payload, // This is the Teleporter message or raw payload
-		ReceivedAt:      time.Now().Unix(),
-		BlockHeight:     blockHeight,
-		SignedMessage:   signedMessageBytes,
-		UnsignedMessage: unsignedMsg.Bytes(),
 	}
 
 	// Add the received message to the builder so it gets included in a block

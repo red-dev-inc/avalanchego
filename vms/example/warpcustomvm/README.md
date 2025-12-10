@@ -2,16 +2,13 @@
 
 A custom Avalanche VM implementing **bidirectional** Avalanche Warp Messaging (AWM) for cross-chain communication. Features consensus-based message propagation with full Snowman consensus integration.
 
-## Features
+## Architecture Overview
 
--  **Send messages** from warpcustomvm to C-Chain (or any other chain)
--  **Receive messages** from C-Chain (or any other chain) to warpcustomvm
--  Full Teleporter protocol support
--  ACP-118 Warp signature aggregation
--  ICM relayer compatibility
--  Consensus-based message propagation
+### What is WarpCustomVM?
 
-## Quick Start
+WarpCustomVM is a custom Avalanche blockchain that enables cross-chain message passing between different blockchain networks (C-Chain, X-Chain, other Subnets) using Avalanche's native Warp Messaging protocol.
+
+### Core Components
 
 ### Send a Message (WarpCustomVM → C-Chain)
 ```bash
@@ -30,7 +27,6 @@ curl -X POST http://localhost:9650/ext/bc/YOUR_BLOCKCHAIN_ID/rpc \
 ```
 
 ### Receive a Message (C-Chain → WarpCustomVM)
-
 **Step 1: Send from C-Chain (Solidity):**
 ```solidity
 // Deploy WarpMessageSender.sol then call:
@@ -40,7 +36,6 @@ senderContract.sendMessage(
   "Hello from C-Chain!"
 );
 ```
-
 **Step 2: ICM Relayer automatically delivers** (no manual action needed!)
 
 **Step 3: Query received messages:**
@@ -55,10 +50,6 @@ curl -X POST http://localhost:9650/ext/bc/YOUR_BLOCKCHAIN_ID/rpc \
   }'
 ```
 
- **For detailed instructions:**
-- [ICM_RELAYER_INTEGRATION.md](./ICM_RELAYER_INTEGRATION.md) - **How ICM relayer works with warpcustomvm**
-- [ICM_RELAYER_CONFIG.md](./ICM_RELAYER_CONFIG.md) - Complete relayer setup & configuration
-- [RECEIVING_MESSAGES.md](./RECEIVING_MESSAGES.md) - Detailed receiving guide
 
 ## Architecture Overview
 
@@ -119,7 +110,6 @@ The warpcustomvm uses JSON-RPC 2.0 format similar to xsvm. All methods are calle
 
 ### warpcustomvm.submitMessage
 Submit a new Warp message for cross-chain delivery. The message is wrapped in Warp → AddressedCall → Teleporter layers automatically.
-
 **Request:**
 ```json
 {
@@ -133,7 +123,6 @@ Submit a new Warp message for cross-chain delivery. The message is wrapped in Wa
   }
 }
 ```
-
 **Response:**
 ```json
 {
@@ -144,7 +133,6 @@ Submit a new Warp message for cross-chain delivery. The message is wrapped in Wa
   }
 }
 ```
-
 **Notes:**
 - `destinationChain`: Destination blockchain ID in hex format (e.g., C-Chain)
 - `destinationAddress`: EVM contract address to receive the message
@@ -153,7 +141,6 @@ Submit a new Warp message for cross-chain delivery. The message is wrapped in Wa
 
 ### warpcustomvm.getMessage
 Retrieve a message by its ID.
-
 **Request:**
 ```json
 {
@@ -165,7 +152,6 @@ Retrieve a message by its ID.
   }
 }
 ```
-
 **Response:**
 ```json
 {
@@ -184,7 +170,6 @@ Retrieve a message by its ID.
 
 ### warpcustomvm.getLatestBlock
 Get the latest accepted block with all embedded messages.
-
 **Request:**
 ```json
 {
@@ -194,7 +179,6 @@ Get the latest accepted block with all embedded messages.
   "params": {}
 }
 ```
-
 **Response:**
 ```json
 {
@@ -222,7 +206,6 @@ Get the latest accepted block with all embedded messages.
   }
 }
 ```
-
 **Notes:**
 - Messages are extracted from the block's `WarpMessages` map (embedded during block building)
 - Includes full Warp message structure with metadata for relayer consumption
@@ -230,7 +213,6 @@ Get the latest accepted block with all embedded messages.
 
 ### warpcustomvm.getBlock
 Get a block by its height.
-
 **Request:**
 ```json
 {
@@ -242,7 +224,6 @@ Get a block by its height.
   }
 }
 ```
-
 **Response:**
 ```json
 {
@@ -263,13 +244,11 @@ Get a block by its height.
 ### Query-Based Message Detection
 
 The ICM relayer queries the VM's JSON-RPC API to detect new Warp messages (no event-based detection required).
-
 **Relayer Workflow:**
 1. **Poll** `warpcustomvm.getLatestBlock` periodically
 2. **Parse** embedded Warp messages from block's `messages` array
 3. **Request** aggregate signatures via ACP-118 P2P handler
 4. **Submit** signed messages to destination chain
-
 **Message Structure in Block:**
 ```json
 {
@@ -293,7 +272,6 @@ The ICM relayer queries the VM's JSON-RPC API to detect new Warp messages (no ev
 ```
 
 ### Relayer Configuration
-
 **Example ICM Relayer Config:**
 ```json
 {
@@ -305,10 +283,30 @@ The ICM relayer queries the VM's JSON-RPC API to detect new Warp messages (no ev
       "rpc-endpoint": "http://127.0.0.1:9650/ext/bc/2EcxPo6BHr9xPcHrjLSgHLzzMtPVuKaKzWvSPDGJQgLkFxUzRQ/rpc",
       "ws-endpoint": "ws://127.0.0.1:9650/ext/bc/2EcxPo6BHr9xPcHrjLSgHLzzMtPVuKaKzWvSPDGJQgLkFxUzRQ/ws",
       "message-contracts": {
-        "0x772eb420B677F0c42Dc1aC503D03E02E92ae1502": {
+        "0x253b2784c75e510dD0fF1da844684a1aC0aa5fcf": {
           "message-format": "teleporter"
         }
       }
+    },
+    {
+      "subnet-id": "11111111111111111111111111111111LpoYY",
+      "blockchain-id": "yH8D7ThNJkxmtkuv2jgBa4P1Rn3Qpr4pPr7QYNfcdoS6k6HWp",
+      "vm": "evm",
+      "rpc-endpoint": {
+        "base-url": "http://localhost:9650/ext/bc/C/rpc"
+      },
+      "ws-endpoint": {
+        "base-url": "ws://localhost:9650/ext/bc/C/ws"
+      },
+      "message-contracts": {
+		"0x8c1678C30474192Fc89A7A8cF28c716a11b029a7": {
+		  "message-format": "raw",
+		  "settings": {
+			"destination-blockchain-id": "2EcxPo6BHr9xPcHrjLSgHLzzMtPVuKaKzWvSPDGJQgLkFxUzRQ",
+			"destination-address": "0x1111111111111111111111111111111111111111"
+		  }
+		}
+	  }
     }
   ],
   "destination-blockchains": [
@@ -318,16 +316,29 @@ The ICM relayer queries the VM's JSON-RPC API to detect new Warp messages (no ev
       "vm": "evm",
       "rpc-endpoint": "https://api.avax-test.network/ext/bc/C/rpc",
       "account-private-key": "${RELAYER_PRIVATE_KEY}"
+    },
+    {
+      "subnet-id": "2U4eQ6cBdihtYCqSxaGfkJ65f6g4ScNEW5gjgHCDAqvSTMeWND",
+	  "blockchain-id": "2EcxPo6BHr9xPcHrjLSgHLzzMtPVuKaKzWvSPDGJQgLkFxUzRQ",
+      "vm": "custom",
+      "rpc-endpoint": {
+        "base-url": "http://127.0.0.1:9650/ext/bc/2EcxPo6BHr9xPcHrjLSgHLzzMtPVuKaKzWvSPDGJQgLkFxUzRQ/rpc",
+        "query-parameters": null,
+        "http-headers": null
+      },
+      "kms-key-id": "",
+      "kms-aws-region": "",
+      "account-private-key": "0x4b8c6a0b7b1e574b068e26c39763335b99f01dd35199518ec245385270924a56",
+      "block-gas-limit": 0
     }
   ]
 }
 ```
-
 **Key Configuration Points:**
 - `vm`: VM ID (base58 encoded, e.g., `srEXi...`)
 - `rpc-endpoint`: Full path including `/rpc`
 - `ws-endpoint`: WebSocket endpoint for real-time updates
-- `message-contracts`: Destination contract addresses expecting Teleporter messages
+- `message-contracts`: Destination contract addresses expecting Teleporter messages for C-Chain
 - Relayer automatically queries `getLatestBlock` for new messages
 
 ### Signature Aggregation (ACP-118)
@@ -340,13 +351,6 @@ The VM implements ACP-118 for Warp signature aggregation:
 4. **Relayer collects** signatures from >50% stake
 5. **Submits to destination** with aggregate signature
 
-**Enable Warp API:**
-```json
-{
-  "warp-api-enabled": true,
-  "log-level": "debug"
-}
-```
 
 ## Building the VM
 
@@ -356,14 +360,8 @@ The VM implements ACP-118 for Warp signature aggregation:
 
 ### Build
 ```bash
-cd vms/example/warpcustomvm
-go build -o warpcustomvm ./...
-```
-
-Or build from the root:
-```bash
 cd avalanchego
-go build -o bin/warpcustomvm ./vms/example/warpcustomvm/...
+./scripts/warpcustomvm.sh
 ```
 
 ## Running the VM
@@ -371,7 +369,7 @@ go build -o bin/warpcustomvm ./vms/example/warpcustomvm/...
 ### 1. Build AvalancheGo with the VM
 ```bash
 cd avalanchego
-go build -o avalanchego ./main
+./scripts/warpcustomvm.sh
 ```
 
 ### 2. Create VM Configuration
@@ -394,12 +392,18 @@ Create `genesis.json`:
 
 ### 4. Start AvalancheGo Node
 ```bash
-./avalanchego --network-id=fuji \
-  --http-host=0.0.0.0 \
-  --http-port=9650 \
-  --staking-tls-cert-file=<path-to-cert> \
-  --staking-tls-key-file=<path-to-key>
-```
+docker run -it -d\
+    --name avago1 \
+    -p 9650:9650 -p 9651:9651 \
+    -v ~/.avalanchego:/root/.avalanchego \
+    -e AVAGO_PUBLIC_IP_RESOLUTION_SERVICE=opendns \
+    -e AVAGO_HTTP_HOST=0.0.0.0 \
+    -e AVAGO_TRACK_SUBNETS=<subnet> \
+    -e AVAGO_NETWORK_ID=fuji \
+    -e AVAGO_HTTP_ALLOWED_HOSTS="*" \
+    -e AVAGO_CHAIN_CONFIG_CONTENT=<content> \
+    -e AVAGO_VM_ALIASES_FILE_CONTENT=<content> \
+    avaplatform/avalanchego:v1.14.0```
 
 ### 5. Create Subnet and Blockchain
 
@@ -428,7 +432,6 @@ curl -X POST http://localhost:9650/ext/bc/2EcxPo6BHr9xPcHrjLSgHLzzMtPVuKaKzWvSPD
     }
   }'
 ```
-
 **Response:**
 ```json
 {
@@ -451,7 +454,6 @@ curl -X POST http://localhost:9650/ext/bc/2EcxPo6BHr9xPcHrjLSgHLzzMtPVuKaKzWvSPD
     "params": {}
   }'
 ```
-
 **Response:**
 ```json
 {
@@ -492,59 +494,6 @@ curl -X POST http://localhost:9650/ext/bc/2EcxPo6BHr9xPcHrjLSgHLzzMtPVuKaKzWvSPD
     }
   }'
 ```
-
-### Using Go Client
-
-```go
-package main
-
-import (
-    "context"
-    "encoding/json"
-    "fmt"
-    "log"
-
-    "github.com/ava-labs/avalanchego/vms/example/warpcustomvm/api"
-)
-
-func main() {
-    // Create client - similar to xsvm
-    client := api.NewClient("http://localhost:9650", "<blockchain-id>")
-    ctx := context.Background()
-
-    // Prepare payload
-    payload, _ := json.Marshal(map[string]interface{}{
-        "action": "transfer",
-        "amount": "1000",
-    })
-
-    // Submit a message
-    messageID, err := client.SubmitMessage(
-        ctx,
-        "P-fuji1abcdef...",
-        "2q9e4r6Mu3U68nU1fYjgbR6JvwrRx36CohpAX5UQxse55x1Q5",
-        "0x1234567890123456789012345678901234567890",
-        1,
-        payload,
-        nil,
-    )
-    if err != nil {
-        log.Fatalf("Failed: %v", err)
-    }
-
-    fmt.Printf("Message submitted! ID: %s\n", messageID)
-
-    // Get latest block
-    block, err := client.GetLatestBlock(ctx)
-    if err != nil {
-        log.Fatalf("Failed: %v", err)
-    }
-
-    fmt.Printf("Latest block height: %d\n", block.Height)
-}
-```
-
-See `examples/client_example.go` for more examples.
 
 ## Consensus Protocol
 
@@ -591,18 +540,18 @@ This VM implements the **Snowman consensus protocol** with block-embedded messag
 
 ## Key Features
 
--  **Snowman Consensus**: Full implementation of Avalanche consensus protocol with threshold voting
--  **Avalanche Warp Messaging (AWM)**: Three-layer structure (Warp → AddressedCall → Teleporter)
--  **ACP-118 P2P Signature Handler**: Aggregate signature collection for Warp messages
--  **Block-Embedded Message Propagation**: Messages propagate through consensus (not gossip)
--  **Consensus-Based Message ID**: Global counter synchronized across all validators
--  **ICM Relayer Compatible**: Standard Warp message format for cross-chain delivery
--  **JSON-RPC 2.0 API**: HTTP endpoints for message submission and querying
--  **State Persistence**: Database-backed storage for messages, blocks, and counters
--  **Height Indexing**: Query blocks by height with full message data
--  **Backward Compatibility**: Handles old blocks without WarpMessages field
--  **Race-Condition Aware**: Proper mutex protection and atomic counter updates
--  **Multi-Validator Support**: Tested with 2-validator setup (weights: 102 + 48 = 150)
+- **Snowman Consensus**: Full implementation of Avalanche consensus protocol with threshold voting
+- **Avalanche Warp Messaging (AWM)**: Three-layer structure (Warp → AddressedCall → Teleporter)
+- **ACP-118 P2P Signature Handler**: Aggregate signature collection for Warp messages
+- **Block-Embedded Message Propagation**: Messages propagate through consensus (not gossip)
+- **Consensus-Based Message ID**: Global counter synchronized across all validators
+- **ICM Relayer Compatible**: Standard Warp message format for cross-chain delivery
+- **JSON-RPC 2.0 API**: HTTP endpoints for message submission and querying
+- **State Persistence**: Database-backed storage for messages, blocks, and counters
+- **Height Indexing**: Query blocks by height with full message data
+- **Backward Compatibility**: Handles old blocks without WarpMessages field
+- **Race-Condition Aware**: Proper mutex protection and atomic counter updates
+- **Multi-Validator Support**: Tested with 2-validator setup (weights: 102 + 48 = 150)
 
 ## Client SDK Usage
 
@@ -614,13 +563,11 @@ import "github.com/ava-labs/avalanchego/vms/example/warpcustomvm/api"
 // Create client
 client := api.NewClient("http://localhost:9650", "<blockchain-id>")
 ```
-
 **Available Methods:**
 - `SubmitMessage(ctx, sender, destBlockchainID, destAddress, nonce, payload, metadata, options...)` - Submit a new TeleporterMessage
 - `GetMessage(ctx, messageID, options...)` - Retrieve a message by ID
 - `GetLatestBlock(ctx, options...)` - Get the latest accepted block
 - `GetBlock(ctx, height, options...)` - Get a block at specific height
-
 **All methods use JSON-RPC 2.0 format** and communicate via a single HTTP endpoint.
 
 See `examples/client_example.go` for a complete working example.
@@ -643,18 +590,16 @@ See `examples/client_example.go` for a complete working example.
 
 ### BuildBlock fails with "preferred block not found"
 **Cause:** Old blocks in database without `WarpMessages` field after code update
-
 **Solution:**
 ```bash
 # Stop validators
-docker stop avago1 avago2
+docker stop avago1
 
 # Delete blockchain database (keeps node identity)
 rm -rf ~/.avalanchego/db/<blockchain-id>
-rm -rf ~/.avalanchego-node2/db/<blockchain-id>
 
 # Restart validators
-docker start avago1 avago2
+docker start avago1
 ```
 
 ### Messages not included in blocks
@@ -666,7 +611,6 @@ docker start avago1 avago2
 
 ### Messages not syncing between validators
 **Cause:** Consensus not reaching threshold or WarpMessages not propagating
-
 **Solution:**
 - Check validator logs for consensus messages (Verify/Accept)
 - Verify both validators are connected via P2P
@@ -676,7 +620,6 @@ docker start avago1 avago2
 
 ### Duplicate Teleporter Message IDs
 **Cause:** Race condition when submitting to multiple nodes simultaneously
-
 **Solution:**
 - Submit messages to **only one node** (primary validator)
 - Or accept that Teleporter protocol handles duplicates gracefully
@@ -685,7 +628,6 @@ docker start avago1 avago2
 
 ### ICM Relayer not picking up messages
 **Cause:** Warp message format or signature aggregation issue
-
 **Solution:**
 - Verify `warp-api-enabled: true` in chain config
 - Check ACP-118 handler logs for signature requests
@@ -696,7 +638,6 @@ docker start avago1 avago2
 
 ### "messages array empty" after submission
 **Cause:** WarpMessages map not initialized or backward compatibility issue
-
 **Solution:**
 - Verify block headers have `WarpMessages` field
 - Check `GetLatestBlock` logs for nil map warnings

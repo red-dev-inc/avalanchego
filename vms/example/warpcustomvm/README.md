@@ -6,7 +6,7 @@ A custom Avalanche VM implementing **bidirectional** Avalanche Warp Messaging (A
 
 ### What is WarpCustomVM?
 
-WarpCustomVM is a custom Avalanche blockchain that enables cross-chain message passing between different blockchain networks (C-Chain, X-Chain, other Subnets) using Avalanche's native Warp Messaging protocol.
+WarpCustomVM is a custom Avalanche blockchain that enables cross-chain message passing between different blockchain networks (C-Chain, and other Subnets) using Avalanche's native Warp Messaging protocol.
 
 ### Core Components
 
@@ -29,14 +29,29 @@ curl -X POST http://localhost:9650/ext/bc/YOUR_BLOCKCHAIN_ID/rpc \
 ### Receive a Message (C-Chain → WarpCustomVM)
 **Step 1: Send from C-Chain (Solidity):**
 ```solidity
-// Deploy WarpMessageSender.sol then call:
-senderContract.sendMessage(
-  0x<WARPCUSTOMVM_BLOCKCHAIN_ID>,
-  0x0200000000000000000000000000000000000005, // Warp precompile
-  "Hello from C-Chain!"
-);
+// Deploy DirectWarpSender.sol then call:
+function sendTextMessage(
+        bytes32 destinationBlockchainID,
+        string calldata message
+    ) external returns (bytes32 messageID) {
+        // Encode the message as bytes
+        bytes memory payload = abi.encode(message);
+        
+        // Send via Warp precompile
+        messageID = WARP_PRECOMPILE.sendWarpMessage(payload);
+        
+        emit WarpMessageSent(
+            messageID,
+            destinationBlockchainID,
+            msg.sender,
+            payload
+        );
+    }
 ```
-**Step 2: ICM Relayer automatically delivers** (no manual action needed!)
+
+**Step 2: ICM Relayer automatically delivers** 
+
+The message is automatically delivered by the ICM Relayer. We forked the [ava-labs/icm-services](https://github.com/ava-labs/icm-services) and made change [see here](https://github.com/tamil-reddev/icm-services/pull/1) repository and added support for WarpCustomVM message sending and receiving. No manual intervention required.
 
 **Step 3: Query received messages:**
 ```bash

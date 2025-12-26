@@ -31,38 +31,62 @@ contract ReceiverOnSubnet is ITeleporterReceiver {
     uint256 public constant BURN_AMOUNT = 1 ether;
 
     string public lastMessage;
+    string public lastError;
 
     // ERC20 Events
     event Transfer(address indexed from, address indexed to, uint256 value);
     event Approval(address indexed owner, address indexed spender, uint256 value);
     event MessageReceivedAndMinted(string message, address recipient, uint256 amount);
     event MessageReceivedAndBurned(string message, address from, uint256 amount);
-	
+    event MessageSendFailed(string reason);
+    
     function receiveTeleporterMessage(bytes32, address, bytes calldata message) external {
         // Only the Teleporter receiver can deliver a message.
-        // require(msg.sender == address(messenger), "CustomL1ToCChain: unauthorized TeleporterMessenger");
+        require(msg.sender == address(messenger), "CustomL1ToCChain: unauthorized TeleporterMessenger");
 
         // Decode and store the message first
         string memory decodedMessage = abi.decode(message, (string));
+        lastMessage = decodedMessage;
         
         // Only mint if the message is "mint"
         if (keccak256(abi.encodePacked(decodedMessage)) == keccak256(abi.encodePacked("mint"))) {
             // Mint tokens to the hardcoded address FIRST (state change)
             _mint(MINT_RECIPIENT, MINT_AMOUNT);
-			
-			// Update lastMessage with timestamp
-			lastMessage = string(abi.encodePacked(
-                "Token minted at block timestamp: ",
-                uint2str(block.timestamp)
+            
+            // Create dynamic confirmation message
+            string memory confirmationMessage = string(abi.encodePacked(
+                "Minted ", 
+                _toString(MINT_AMOUNT / 1 ether), 
+                " token(s) to ", 
+                _toHexString(MINT_RECIPIENT),
+                ". New total supply: ",
+                _toString(totalSupply / 1 ether)
             ));
             
-            emit MessageReceivedAndMinted(lastMessage, MINT_RECIPIENT, MINT_AMOUNT);
-			
-			// Try to send confirmation back to custom VM (don't revert if this fails)
-			try this.sendMessageToCustomVM(lastMessage) {
+            // Update lastMessage
+            lastMessage = confirmationMessage;
+            
+            emit MessageReceivedAndMinted(confirmationMessage, MINT_RECIPIENT, MINT_AMOUNT);
+            
+            // Try to send confirmation back to custom VM (don't revert if this fails)
+            try messenger.sendCrossChainMessage(
+                TeleporterMessageInput({
+                    destinationBlockchainID: 0xa29f2cd4246047db8dd8dfd4b189abb0f4a68698767ebabe209e9d1c059dc6a1,
+                    destinationAddress: address(0x1111111111111111111111111111111111111111),
+                    feeInfo: TeleporterFeeInfo({feeTokenAddress: address(0), amount: 0}),
+                    requiredGasLimit: 100000,
+                    allowedRelayerAddresses: new address[](0),
+                    message: abi.encode(confirmationMessage)
+                })
+            ) {
                 // Success - message sent
-            } catch {
+            } catch Error(string memory reason) {
                 // Failed - but minting still succeeded
+                lastError = reason;
+                emit MessageSendFailed(reason);
+            } catch {
+                lastError = "Unknown error sending message";
+                emit MessageSendFailed("Unknown error");
             }
         }
         // Only burn if the message is "burn"
@@ -70,19 +94,40 @@ contract ReceiverOnSubnet is ITeleporterReceiver {
             // Burn tokens from the hardcoded address FIRST (state change)
             _burn(MINT_RECIPIENT, BURN_AMOUNT);
             
-			// Update lastMessage with timestamp
-			lastMessage = string(abi.encodePacked(
-                "Token burned at block timestamp: ",
-                uint2str(block.timestamp)
+            // Create dynamic confirmation message
+            string memory confirmationMessage = string(abi.encodePacked(
+                "Burned ", 
+                _toString(BURN_AMOUNT / 1 ether), 
+                " token(s) from ", 
+                _toHexString(MINT_RECIPIENT),
+                ". Remaining total supply: ",
+                _toString(totalSupply / 1 ether)
             ));
             
-            emit MessageReceivedAndBurned(lastMessage, MINT_RECIPIENT, BURN_AMOUNT);
-			
-			// Try to send confirmation back to custom VM (don't revert if this fails)
-            try this.sendMessageToCustomVM(lastMessage) {
+            // Update lastMessage
+            lastMessage = confirmationMessage;
+            
+            emit MessageReceivedAndBurned(confirmationMessage, MINT_RECIPIENT, BURN_AMOUNT);
+            
+            // Try to send confirmation back to custom VM (don't revert if this fails)
+            try messenger.sendCrossChainMessage(
+                TeleporterMessageInput({
+                    destinationBlockchainID: 0xa29f2cd4246047db8dd8dfd4b189abb0f4a68698767ebabe209e9d1c059dc6a1,
+                    destinationAddress: address(0x1111111111111111111111111111111111111111),
+                    feeInfo: TeleporterFeeInfo({feeTokenAddress: address(0), amount: 0}),
+                    requiredGasLimit: 100000,
+                    allowedRelayerAddresses: new address[](0),
+                    message: abi.encode(confirmationMessage)
+                })
+            ) {
                 // Success - message sent
-            } catch {
+            } catch Error(string memory reason) {
                 // Failed - but burning still succeeded
+                lastError = reason;
+                emit MessageSendFailed(reason);
+            } catch {
+                lastError = "Unknown error sending message";
+                emit MessageSendFailed("Unknown error");
             }
         }
         else {
@@ -144,55 +189,46 @@ contract ReceiverOnSubnet is ITeleporterReceiver {
         
         emit Transfer(from, address(0), amount);
     }
-	
-	/**
-     * @notice Convert uint256 to string
-     * @param _i The uint256 to convert
-     * @return The string representation
-     */
-    function uint2str(uint256 _i) internal pure returns (string memory) {
-        if (_i == 0) {
+    
+    // Helper function to convert uint256 to string
+    function _toString(uint256 value) internal pure returns (string memory) {
+        if (value == 0) {
             return "0";
         }
-        uint256 j = _i;
-        uint256 len;
-        while (j != 0) {
-            len++;
-            j /= 10;
+        uint256 temp = value;
+        uint256 digits;
+        while (temp != 0) {
+            digits++;
+            temp /= 10;
         }
-        bytes memory bstr = new bytes(len);
-        uint256 k = len;
-        while (_i != 0) {
-            k = k-1;
-            uint8 temp = (48 + uint8(_i - _i / 10 * 10));
-            bytes1 b1 = bytes1(temp);
-            bstr[k] = b1;
-            _i /= 10;
+        bytes memory buffer = new bytes(digits);
+        while (value != 0) {
+            digits -= 1;
+            buffer[digits] = bytes1(uint8(48 + uint256(value % 10)));
+            value /= 10;
         }
-        return string(bstr);
+        return string(buffer);
     }
-	
-	function sendMessageToCustomVMCheck(string memory message) public {
-        sendMessageToCustomVM(message);
+    
+    // Helper function to convert address to hex string
+    function _toHexString(address addr) internal pure returns (string memory) {
+        bytes memory buffer = new bytes(42);
+        buffer[0] = '0';
+        buffer[1] = 'x';
+        for (uint256 i = 0; i < 20; i++) {
+            uint8 value = uint8(uint160(addr) >> (8 * (19 - i)));
+            buffer[2 + i * 2] = _toHexChar(value >> 4);
+            buffer[3 + i * 2] = _toHexChar(value & 0x0f);
+        }
+        return string(buffer);
     }
-	
-	/**
-     * @notice External function to send message to Custom VM via C-Chain contract
-     * @param message The text message to send
-     */
-    function sendMessageToCustomVM(string memory message) public {
-        // Use low-level call to CChainToCustomL1 contract
-        address cchainContract = 0x8c1678C30474192Fc89A7A8cF28c716a11b029a7;
-		
-		cchainContract.call(
-            abi.encodeWithSignature(
-                "sendTextMessage(bytes32,string)",
-                bytes32(0xa29f2cd4246047db8dd8dfd4b189abb0f4a68698767ebabe209e9d1c059dc6a1),
-                message
-            )
-        );
-        
-        // Check success
-        //require(success, "Message send to C-Chain contract failed 1");
+    
+    // Helper function to convert a nibble to hex character
+    function _toHexChar(uint8 value) internal pure returns (bytes1) {
+        if (value < 10) {
+            return bytes1(uint8(48 + value)); // 0-9
+        } else {
+            return bytes1(uint8(87 + value)); // a-f
+        }
     }
 }

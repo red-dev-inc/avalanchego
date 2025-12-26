@@ -41,7 +41,7 @@ func CreateHardcodedTeleporterMessage(destinationChainID ids.ID, userPayload []b
 		SenderAddress:           common.HexToAddress("0x253b2784c75e510dD0fF1da844684a1aC0aa5fcf"), // Teleporter contract address
 		DestinationBlockchainID: destChainID,
 		DestinationAddress:      common.HexToAddress("0x1AA5722D8C209d1657c9e973F379d36c342E1eC4"), // Hardcoded destination
-		RequiredGasLimit:        big.NewInt(100000),                                                // Hardcoded gas limit
+		RequiredGasLimit:        big.NewInt(2000000),                                               // Hardcoded gas limit
 		AllowedRelayerAddresses: []common.Address{},                                                // Empty for now
 		Receipts:                []TeleporterMessageReceipt{},                                      // Empty receipts
 		Message:                 userPayload,

@@ -62,10 +62,10 @@ func CreateMinimalTeleporterPayload(destinationChainID ids.ID, userMessage []byt
 		common.HexToAddress("0x253b2784c75e510dD0fF1da844684a1aC0aa5fcf"), // senderAddress (Teleporter contract)
 		destChainID, // destinationBlockchainID
 		common.HexToAddress("0x1AA5722D8C209d1657c9e973F379d36c342E1eC4"), // destinationAddress
-		big.NewInt(100000), // requiredGasLimit
-		emptyAddressArray,  // allowedRelayerAddresses
-		emptyReceipts,      // receipts
-		userMessage,        // message
+		big.NewInt(2000000), // requiredGasLimit
+		emptyAddressArray,   // allowedRelayerAddresses
+		emptyReceipts,       // receipts
+		userMessage,         // message
 	)
 
 	if err != nil {
@@ -131,7 +131,7 @@ func CreateProperTeleporterMessageWithAddress(teleporterMessageID uint64, destin
 	fmt.Printf("   senderAddress: 0x253b2784c75e510dD0fF1da844684a1aC0aa5fcf (Teleporter contract)\n")
 	fmt.Printf("   destinationBlockchainID: 0x%x\n", destChainID)
 	fmt.Printf("   destinationAddress: %s\n", destAddr.Hex())
-	fmt.Printf("   requiredGasLimit: 100000\n")
+	fmt.Printf("   requiredGasLimit: 2000000\n")
 	fmt.Printf("   allowedRelayerAddresses: []\n")
 	fmt.Printf("   receipts: []\n")
 	fmt.Printf("   message: %d bytes\n", len(userMessage))
@@ -154,7 +154,7 @@ func CreateProperTeleporterMessageWithAddress(teleporterMessageID uint64, destin
 		SenderAddress:           common.HexToAddress("0x253b2784c75e510dD0fF1da844684a1aC0aa5fcf"),
 		DestinationBlockchainID: destChainID,
 		DestinationAddress:      destAddr,
-		RequiredGasLimit:        big.NewInt(100000),
+		RequiredGasLimit:        big.NewInt(2000000),
 		AllowedRelayerAddresses: []common.Address{},
 		Receipts: []struct {
 			ReceivedMessageID    *big.Int
@@ -235,7 +235,7 @@ func CreateProperTeleporterMessage(destinationChainID ids.ID, userMessage []byte
 		SenderAddress:           common.HexToAddress("0x253b2784c75e510dD0fF1da844684a1aC0aa5fcf"), // Teleporter contract address
 		DestinationBlockchainID: destChainID,
 		DestinationAddress:      common.HexToAddress("0x1AA5722D8C209d1657c9e973F379d36c342E1eC4"),
-		RequiredGasLimit:        big.NewInt(100000),
+		RequiredGasLimit:        big.NewInt(2000000),
 		AllowedRelayerAddresses: []common.Address{},
 		Receipts: []struct {
 			ReceivedMessageID    *big.Int
